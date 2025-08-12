@@ -27,13 +27,18 @@ init_db_called = False
 def init_db():
     with closing(sqlite3.connect(DB_PATH)) as conn:
         conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("CREATE TABLE IF NOT EXISTS counter (id INTEGER PRIMARY KEY CHECK (id=1), value INTEGER NOT NULL)")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS counter (id INTEGER PRIMARY KEY CHECK (id=1), value INTEGER NOT NULL)"
+        )
         # Initialize single-row counter if missing
         cur = conn.execute("SELECT value FROM counter WHERE id=1")
         row = cur.fetchone()
         if row is None:
-            conn.execute("INSERT INTO counter (id, value) VALUES (1, 0)")
+            # Start just past '9999'
+            START_VALUE = 304426  # decimal equivalent of SKU '999A'
+            conn.execute("INSERT INTO counter (id, value) VALUES (1, ?)", (START_VALUE,))
         conn.commit()
+
 
 def int_to_sku(n: int) -> str:
     if n < 0 or n >= MAX_COUNT:
