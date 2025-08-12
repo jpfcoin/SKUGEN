@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>JP Ford SKU Generator</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="container">
+      <h1>JP Ford SKU Generator</h1>
+      <p class="subtitle">4‑character SKUs • No B, I, O, S • Unique and sequential</p>
+
+      <button id="genBtn">Generate SKU</button>
+
+      <div id="resultCard" class="result hidden">
+        <div class="sku" id="skuText">----</div>
+        <button id="copyBtn" class="copy">Copy</button>
+      </div>
+
+      <div id="error" class="error hidden"></div>
+
+      <footer>
+        <a href="/healthz" target="_blank" rel="noopener">Status</a>
+      </footer>
+    </div>
+
+    <script src="/static/main.js"></script>
+  </body>
+</html>
