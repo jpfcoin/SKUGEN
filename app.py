@@ -3,6 +3,16 @@ import sqlite3
 from flask import Flask, jsonify, render_template, request, send_from_directory, abort
 from contextlib import closing
 
+def sku_to_int(s: str) -> int:
+    s = s.strip().upper()
+    value = 0
+    for ch in s:
+        idx = SAFE_CHARS.find(ch)
+        if idx < 0:
+            raise ValueError(f"Invalid SKU character: {ch}")
+        value = value * BASE + idx
+    return value
+
 SAFE_CHARS = '0123456789ACDEFGHJKLMNPRTUVWXYZ'  # 32-char alphabet (no B, I, O, S)
 BASE = len(SAFE_CHARS)
 MAX_COUNT = BASE ** 4  # 32^4 = 1,048,576
