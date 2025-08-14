@@ -2,9 +2,15 @@ services:
   - type: web
     name: jpf-sku-gen
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      # hard-stop psycopg2 from lingering in cache or transitive deps
+      pip uninstall -y psycopg2 psycopg2-binary || true
+    startCommand: gunicorn -w 2 app:app
     plan: free
     envVars:
       - key: FLASK_ENV
         value: production
+      - key: DATABASE_URL
+        sync: false
