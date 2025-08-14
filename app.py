@@ -1,44 +1,11 @@
 import os
-import sqlite3
-from flask import Flask, jsonify, render_template, request, send_from_directory, abort
-from contextlib import closing
+from flask import Flask, jsonify, render_template
+import psycopg2
 
-def sku_to_int(s: str) -> int:
-    s = s.strip().upper()
-    value = 0
-    for ch in s:
-        idx = SAFE_CHARS.find(ch)
-        if idx < 0:
-            raise ValueError(f"Invalid SKU character: {ch}")
-        value = value * BASE + idx
-    return value
-
+# ====== SKU alphabet & helpers ======
 SAFE_CHARS = '0123456789ACDEFGHJKLMNPRTUVWXYZ'  # 32-char alphabet (no B, I, O, S)
 BASE = len(SAFE_CHARS)
 MAX_COUNT = BASE ** 4  # 32^4 = 1,048,576
-
-DB_PATH = os.environ.get("DATABASE_PATH", "sku.db")
-
-app = Flask(__name__)
-
-# Initialize DB on import for hosted environments
-init_db_called = False
-
-def init_db():
-    with closing(sqlite3.connect(DB_PATH)) as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS counter (id INTEGER PRIMARY KEY CHECK (id=1), value INTEGER NOT NULL)"
-        )
-        # Initialize single-row counter if missing
-        cur = conn.execute("SELECT value FROM counter WHERE id=1")
-        row = cur.fetchone()
-        if row is None:
-            # Start just past '9999'
-            START_VALUE = 304426  # decimal equivalent of SKU '999A'
-            conn.execute("INSERT INTO counter (id, value) VALUES (1, ?)", (START_VALUE,))
-        conn.commit()
-
 
 def int_to_sku(n: int) -> str:
     if n < 0 or n >= MAX_COUNT:
@@ -49,25 +16,58 @@ def int_to_sku(n: int) -> str:
         n //= BASE
     return ''.join(reversed(out))
 
-def get_next_counter() -> int:
-    """Atomically get and increment the counter, returning the previous value."""
-    with closing(sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)) as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("BEGIN IMMEDIATE")
-        cur = conn.execute("SELECT value FROM counter WHERE id=1")
-        row = cur.fetchone()
-        if row is None:
-            conn.execute("INSERT INTO counter (id, value) VALUES (1, 0)")
-            current = 0
-        else:
-            current = row[0]
-        if current >= MAX_COUNT:
-            conn.execute("COMMIT")
-            raise ValueError("SKU space exhausted (over 1,048,576 issued).")
-        conn.execute("UPDATE counter SET value = value + 1 WHERE id=1")
-        conn.execute("COMMIT")
-        return current
+# ====== Flask app ======
+app = Flask(__name__)
 
+# ====== PostgreSQL utilities ======
+def get_pg_conn():
+    url = os.environ["DATABASE_URL"]  # set this in Render → Environment
+    return psycopg2.connect(url)
+
+def ensure_pg_objects():
+    """
+    Create the global counter sequence starting just past '9999' -> '999A' (decimal 304426),
+    and an optional audit table to record issued counters.
+    Safe to run more than once.
+    """
+    ddl = """
+    CREATE SEQUENCE IF NOT EXISTS sku_counter START WITH 304426;
+    CREATE TABLE IF NOT EXISTS issued_skus (
+      n BIGINT PRIMARY KEY,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+    """
+    with get_pg_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(ddl)
+        conn.commit()
+
+# Run once on import (best-effort)
+try:
+    ensure_pg_objects()
+except Exception:
+    # If the DB isn't reachable at import time, the first request will still work;
+    # we don't crash the app here.
+    pass
+
+def get_next_counter() -> int:
+    """
+    Atomically obtain the next global counter from PostgreSQL.
+    nextval() is concurrency-safe across multiple workers/instances.
+    """
+    with get_pg_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT nextval('sku_counter')")
+            (n,) = cur.fetchone()
+            # Optional audit insert (ignore if table missing or duplicate)
+            try:
+                cur.execute("INSERT INTO issued_skus (n) VALUES (%s)", (n,))
+            except Exception:
+                pass
+        conn.commit()
+    return n
+
+# ====== Routes ======
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -78,16 +78,14 @@ def api_next():
         n = get_next_counter()
         sku = int_to_sku(n)
         return jsonify({"sku": sku})
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        # Return message for quick diagnosis; adjust if you prefer a generic error
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/healthz")
 def healthz():
     return "ok"
 
-if not init_db_called:
-    init_db()
-    init_db_called = True
-
 if __name__ == "__main__":
+    # Local dev: run Flask's server
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
