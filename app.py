@@ -22,7 +22,7 @@ app = Flask(__name__)
 # ====== PostgreSQL utilities ======
 def get_pg_conn():
     url = os.environ["DATABASE_URL"]  # set this in Render → Environment
-    return psycopg2.connect(url)
+    return psycopg.connect(url)
 
 def ensure_pg_objects():
     """
